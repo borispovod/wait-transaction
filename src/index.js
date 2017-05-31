@@ -1,49 +1,49 @@
-// Based on https://github.com/ConsenSys/ether-pudding/blob/f3b7e5921a8884e869f25cc254a6c4d6a2d8c7e9/index.js#L240
 module.exports = (web3, options = {}) => {
   options.maxAttempts = options.maxAttempts || 240
   options.timeInterval = options.timeInterval || 1000
 
-  return (...args) => {
-    return new Promise((resolve, reject) => {
-      const callback = (errSend, tx) => {
-        let interval
+  return (tx) => {
+    let attempts = 0
 
-        if (errSend) {
-          clearInterval(interval)
-          return reject(errSend)
-        }
+    const makeAttempt = (tx) => {
+      return new Promise((resolve, reject) => {
+        web3.eth.getTransaction(tx, (err, results) => {
+          if (err) {
+            reject(err)
+            return
+          }
 
-        const makeAttempt = () => {
-          let attempts = 0
+          if (results.blockHash) {
+            resolve(results.blockHash)
+            return
+          }
 
-          web3.eth.getTransaction(tx, (errTx, results) => {
-            // error
-            if (errTx) {
-              clearInterval(interval)
-              return reject(errTx)
-            }
+          if (attempts++ >= options.maxAttempts) {
+            reject(new Error('Transaction ' + tx + ' wasn\'t processed in ' + attempts + ' attempts!'))
+            return
+          }
 
-            // resolved
-            if (results && results.blockHash) {
-              clearInterval(interval)
-              resolve(tx)
-            }
+          resolve()
+        })
+      })
+    }
 
-            // exceeded max attempts
-            if (attempts >= options.maxAttempts) {
-              clearInterval(interval)
-              reject(new Error('Transaction ' + tx + ' wasn\'t processed in ' + attempts + ' attempts!'))
-            }
-
-            attempts++
+    const recursion = () => {
+      return makeAttempt(tx).then(blockHash => {
+        if (blockHash) {
+          return blockHash
+        } else {
+          return new Promise(resolve => {
+            setTimeout(() => {
+              resolve()
+            }, options.timeInterval)
+          }).then(() => {
+            return recursion()
           })
         }
+      })
+    }
 
-        interval = setInterval(makeAttempt, options.timeInterval)
-        makeAttempt()
-      }
-
-      web3.eth.sendTransaction(...[...args, callback])
-    })
+    return recursion()
   }
 }
